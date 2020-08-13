@@ -27,93 +27,20 @@ class CouchBaseResultImpl : public trantor::NonCopyable
     }
 
   private:
-    virtual void init() = 0;
 };
-namespace operation
-{
-struct Base
-{
-    using CType = lcb_CMDBASE;
-    using RType = lcb_RESPBASE;
-};
-struct Get
-{
-    using CType = lcb_CMDGET;
-    using RType = lcb_RESPGET;
-};
-struct Store
-{
-    using CType = lcb_CMDSTORE;
-    using RType = lcb_RESPSTORE;
-};
-struct Touch
-{
-    using CType = lcb_CMDTOUCH;
-    using RType = lcb_RESPTOUCH;
-};
-struct Remove
-{
-    using CType = lcb_CMDREMOVE;
-    using RType = lcb_RESPREMOVE;
-};
-struct Unlock
-{
-    using CType = lcb_CMDUNLOCK;
-    using RType = lcb_RESPUNLOCK;
-};
-struct Counter
-{
-    using CType = lcb_CMDCOUNTER;
-    using RType = lcb_RESPCOUNTER;
-};
-//struct Stats
-//{
-//    using CType = lcb_CMDSTATS;
-//    using RType = lcb_RESPSTATS;
-//};
-//struct Observe
-//{
-//    using CType = lcb_CMDOBSERVE;
-//    using RType = lcb_RESPOBSERVE;
-//};
-//struct Endure
-//{
-//    using CType = lcb_CMDENDURE;
-//    using RType = lcb_RESPENDURE;
-//};
-}  // namespace operation
-template <typename T = operation::Base>
-class LcbResult : CouchBaseResultImpl
-{
-  public:
-    using RType = typename T::RType;
-    LcbResult(RType *resp)
-    {
-        u_.resp_ = *resp;
-    }
-    virtual ~LcbResult()
-    {
-    }
 
-  protected:
-    union {
-        lcb_RESPBASE base_;
-        RType resp_;
-    } u_;
-};
-class GetLcbResult : public LcbResult<operation::Get>
+class GetLcbResult : public CouchBaseResultImpl
 {
   public:
-    GetLcbResult(const RType *resp) : LcbResult<operation::Get>(resp)
+    GetLcbResult(const lcb_RESPGET* resp)
     {
-        assert(u_.base_.rc == LCB_SUCCESS);
-        if (u_.resp_.bufh)
+        if (resp->bufh)
         {
-            lcb_backbuf_ref((lcb_BACKBUF)u_.resp_.bufh);
+            lcb_backbuf_ref((lcb_BACKBUF)resp->bufh);
         }
-        else if (u_.resp_.nvalue)
+        else if (resp->nvalue)
         {
-            char *tmp = new char[u_.resp_.nvalue];
+            char* tmp = new char[resp->nvalue];
             u_.resp_.value = tmp;
         }
     }
@@ -128,6 +55,14 @@ class GetLcbResult : public LcbResult<operation::Get>
             delete[] u_.resp_.value;
         }
     }
+
+  private:
+    char* key;
+    char* value;
+    size_t key_len;
+    size_t value_len;
+    uint64_t cas;
+    uint32_t flags;
 };
 }  // namespace nosql
 }  // namespace drogon
