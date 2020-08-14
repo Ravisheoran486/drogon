@@ -42,14 +42,18 @@ void CouchBaseConnection::lcbDeleteEvent(struct lcb_io_opt_st *iops,
     if (self->channelPtr_)
     {
         int ev = *static_cast<int *>(event);
-        if (ev & trantor::Channel::kWriteEvent &&
-            self->channelPtr_->isWriting())
+        int events = self->channelPtr_->events();
+        if (ev & trantor::Channel::kWriteEvent)
         {
-            self->channelPtr_->disableWriting();
+            events &= ~trantor::Channel::kWriteEvent;
         }
-        if (ev & trantor::Channel::kReadEvent && self->channelPtr_->isReading())
+        if (ev & trantor::Channel::kReadEvent)
         {
-            self->channelPtr_->disableReading();
+            events &= ~trantor::Channel::kReadEvent;
+        }
+        if (events != self->channelPtr_->events())
+        {
+            self->channelPtr_->updateEvents(events);
         }
     }
     (void)sock;
@@ -62,6 +66,7 @@ void CouchBaseConnection::lcbDeleteTimer(struct lcb_io_opt_st *iops,
         static_cast<CouchBaseConnection *>(iops->v.v2.cookie);
     auto timeId = static_cast<trantor::TimerId *>(event);
     self->loop_->invalidateTimer(*timeId);
+    self->timerMap_.erase(*timeId);
 }
 
 int CouchBaseConnection::lcbUpdateEvent(struct lcb_io_opt_st *iops,
@@ -75,7 +80,8 @@ int CouchBaseConnection::lcbUpdateEvent(struct lcb_io_opt_st *iops,
 {
     CouchBaseConnection *self =
         static_cast<CouchBaseConnection *>(iops->v.v2.cookie);
-    int evt = *static_cast<int *>(event);
+    self->loop_->assertInLoopThread();
+    int *evt = static_cast<int *>(event);
     if (!self->channelPtr_)
     {
         self->channelPtr_ =
@@ -91,38 +97,32 @@ int CouchBaseConnection::lcbUpdateEvent(struct lcb_io_opt_st *iops,
     {
         events |= trantor::Channel::kWriteEvent;
     }
-
-    if (handler == self->handlerMap_[events])
+    *evt = events;
+    if (self->channelPtr_->events() == events &&
+        handler == self->handlerMap_[events])
     {
         /* no change! */
         return 0;
     }
-    self->handlerMap_[events] = handler;
-    if (flags & LCB_READ_EVENT)
+    if (self->handlerMap_[events] != handler)
     {
-        self->channelPtr_->setReadCallback(
-
-            [self, handler, cb_data, sock]() {
-                handler(sock, LCB_READ_EVENT, cb_data);
-            });
-        if (!self->channelPtr_->isReading())
-        {
-            self->channelPtr_->enableReading();
-        }
+        self->handlerMap_[events] = handler;
+        self->channelPtr_->setEventCallback([self, sock, cb_data, handler]() {
+            auto revent = self->channelPtr_->revents();
+            short which{0};
+            if (revent & trantor::Channel::kReadEvent)
+            {
+                which |= LCB_READ_EVENT;
+            }
+            if (revent & trantor::Channel::kWriteEvent)
+            {
+                which |= LCB_WRITE_EVENT;
+            }
+            handler(sock, which, cb_data);
+        });
     }
-    if (flags & LCB_WRITE_EVENT)
-    {
-        self->channelPtr_->setWriteCallback(
-
-            [self, handler, cb_data, sock]() {
-                handler(sock, LCB_WRITE_EVENT, cb_data);
-            });
-        if (!self->channelPtr_->isWriting())
-        {
-            self->channelPtr_->enableWriting();
-        }
-    }
-
+    if (self->channelPtr_->events() != events)
+        self->channelPtr_->updateEvents(events);
     return 0;
 }
 int CouchBaseConnection::lcbUpdateTimer(struct lcb_io_opt_st *iops,
@@ -146,10 +146,9 @@ int CouchBaseConnection::lcbUpdateTimer(struct lcb_io_opt_st *iops,
         self->timerMap_.erase(iter);
         self->loop_->invalidateTimer(*timerId);
     }
-    *timerId = self->loop_->runAfter(std::chrono::microseconds(usec),
-                                     [handler, cb_data]() {
-                                         handler(-1, LCB_ERROR_EVENT, cb_data);
-                                     });
+    *timerId =
+        self->loop_->runAfter(std::chrono::microseconds(usec),
+                              [handler, cb_data]() { handler(0, 0, cb_data); });
     assert(*timerId);
     self->timerMap_[*timerId] = handler;
     return 0;
@@ -218,6 +217,7 @@ CouchBaseConnection::CouchBaseConnection(const drogon::string_view &connStr,
 {
     loop->queueInLoop([this]() { connect(); });
 }
+
 void CouchBaseConnection::connect()
 {
     ioop_ = std::make_unique<lcb_io_opt_st>();
@@ -268,10 +268,10 @@ void CouchBaseConnection::connect()
                                CouchBaseConnection::bootstrapCallback);
     lcb_install_callback(instance_,
                          LCB_CALLBACK_GET,
-                         (lcb_RESPCALLBACK)get_callback);
+                         (lcb_RESPCALLBACK)CouchBaseConnection::getCallback);
     lcb_install_callback(instance_,
                          LCB_CALLBACK_STORE,
-                         (lcb_RESPCALLBACK)store_callback);
+                         (lcb_RESPCALLBACK)CouchBaseConnection::storeCallback);
 
     if ((error = lcb_connect(instance_)) != LCB_SUCCESS)
     {
@@ -317,4 +317,23 @@ void CouchBaseConnection::getCallback(lcb_INSTANCE *instance,
     }
     std::shared_ptr<CouchBaseResultImpl> resultImplPtr =
         std::make_shared<GetLcbResult>(rg);
+    // TODO: callback;
+}
+
+void CouchBaseConnection::storeCallback(lcb_INSTANCE *instance,
+                                        int cbtype,
+                                        const lcb_RESPSTORE *resp)
+{
+    lcb_STATUS rc = lcb_respstore_status(resp);
+    if (rc != LCB_SUCCESS)
+    {
+        LOG_ERROR << "failed to store key: " << lcb_strerror_short(rc);
+        // TODO:: call exception callback;
+    }
+    printf("stored key 'foo'\n");
+
+    std::shared_ptr<CouchBaseResultImpl> resultImplPtr =
+        std::make_shared<StoreLcbResult>(resp);
+    // TODO: callback;
+    (void)cbtype;
 }

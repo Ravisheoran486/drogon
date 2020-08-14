@@ -41,7 +41,7 @@ class CouchBaseConnection
   private:
     using ConnectionPtr = std::shared_ptr<CouchBaseConnection>;
     using ConnectionCallback = std::function<void(const ConnectionPtr &)>;
-    using GetCallback=std::function<void(const CouchBaseResult &)>;
+    using GetCallback = std::function<void(const CouchBaseResult &)>;
     trantor::EventLoop *loop_;
     std::unique_ptr<lcb_io_opt_st> ioop_;
     std::unique_ptr<trantor::Channel> channelPtr_;
@@ -53,7 +53,7 @@ class CouchBaseConnection
     lcb_INSTANCE *instance_ = nullptr;
     ConnectionCallback closeCallback_{[](const ConnectionPtr &) {}};
     ConnectionCallback okCallback_{[](const ConnectionPtr &) {}};
-    GetCallback getCallback_{[](const CouchBaseResult &){}};
+    GetCallback getCallback_{[](const CouchBaseResult &) {}};
     drogon::string_view connString_;
     drogon::string_view userName_;
     drogon::string_view password_;
@@ -94,6 +94,9 @@ class CouchBaseConnection
     static void getCallback(lcb_INSTANCE *instance,
                             int cbtype,
                             const lcb_RESPGET *rg);
+    static void storeCallback(lcb_INSTANCE *instance,
+                              int cbtype,
+                              const lcb_RESPSTORE *resp);
 };
 using CouchBaseConnectionPtr = std::shared_ptr<CouchBaseConnection>;
 }  // namespace nosql

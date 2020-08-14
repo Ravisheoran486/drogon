@@ -15,6 +15,8 @@
 #include <libcouchbase/couchbase.h>
 #include <libcouchbase/pktfwd.h>
 #include <trantor/utils/NonCopyable.h>
+#include <string>
+
 namespace drogon
 {
 namespace nosql
@@ -32,37 +34,25 @@ class CouchBaseResultImpl : public trantor::NonCopyable
 class GetLcbResult : public CouchBaseResultImpl
 {
   public:
-    GetLcbResult(const lcb_RESPGET* resp)
-    {
-        if (resp->bufh)
-        {
-            lcb_backbuf_ref((lcb_BACKBUF)resp->bufh);
-        }
-        else if (resp->nvalue)
-        {
-            char* tmp = new char[resp->nvalue];
-            u_.resp_.value = tmp;
-        }
-    }
-    virtual ~GetLcbResult()
-    {
-        if (u_.resp_.bufh)
-        {
-            lcb_backbuf_unref((lcb_BACKBUF)u_.resp_.bufh);
-        }
-        else if (u_.resp_.value)
-        {
-            delete[] u_.resp_.value;
-        }
-    }
-
+    GetLcbResult(const lcb_RESPGET* resp);
   private:
-    char* key;
-    char* value;
-    size_t key_len;
-    size_t value_len;
-    uint64_t cas;
-    uint32_t flags;
+    std::string key_;
+    std::string value_;
+    uint64_t cas_{0};
+    uint32_t flags_{0};
+    lcb_STATUS status_{LCB_SUCCESS};
+    uint8_t dataType_{0};
 };
+
+class StoreLcbResult : public CouchBaseResultImpl
+{
+  public:
+    StoreLcbResult(const lcb_RESPSTORE* resp);
+  private:
+    std::string key_;
+    uint64_t cas_{0};
+    lcb_STATUS status_{LCB_SUCCESS};
+};
+
 }  // namespace nosql
 }  // namespace drogon
